@@ -12,9 +12,10 @@ class PseudofyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Pseudofy',
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple)),
-      darkTheme: ThemeData.dark().copyWith(colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple)),
+      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.green)),
+      // darkTheme: ThemeData.dark().copyWith(colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple)),
       home: const HomeScreen(),
     );
   }

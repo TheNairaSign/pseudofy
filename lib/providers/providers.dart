@@ -25,14 +25,24 @@ class ProblemInputNotifier extends Notifier<ProblemInput> {
 
   void setText(String text) => state = state.copyWith(text: text);
 
-  void toggleParadigm(String paradigm) {
-    final current = List<String>.from(state.selectedParadigms);
-    current.contains(paradigm) ? current.remove(paradigm) : current.add(paradigm);
-    state = state.copyWith(selectedParadigms: current);
-  }
+  /// Single-select paradigm filter (playground UI uses a dropdown, not
+  /// multi-select chips). `null` clears it back to "Any".
+  void setParadigm(String? paradigm) =>
+      state = state.copyWith(selectedParadigms: paradigm == null ? [] : [paradigm]);
 }
 
 final problemInputProvider = NotifierProvider<ProblemInputNotifier, ProblemInput>(ProblemInputNotifier.new);
+
+// ---------- Sidebar collapse state ----------
+
+class SidebarNotifier extends Notifier<bool> {
+  @override
+  bool build() => true;
+
+  void setExpanded(bool value) => state = value;
+}
+
+final sidebarExpandedProvider = NotifierProvider<SidebarNotifier, bool>(SidebarNotifier.new);
 
 // ---------- Service + library (no network until classify() is called) ----------
 

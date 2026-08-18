@@ -84,13 +84,42 @@ List<SolutionModel>   — one per paradigm variant, each also carrying problemId
 so the UI can show which catalog entry matched
         │
         ▼
-SolutionView (lib/widgets/solution_view.dart) — outer tab per paradigm variant, inner tabs
-Pseudocode / Flowchart / Code
+MainWorkspace (lib/widgets/workspace.dart) — Pseudocode / Flowchart / Code view-mode tabs,
+persistent across which variant/algorithm is selected
 ```
 
-Bypassing classification entirely (tapping a library entry or an alternative-match suggestion)
-goes through `ClassificationNotifier.selectManually(id)` instead, which synthesizes a
-`ClassificationResult` with confidence 1.0 and feeds the same `resolveSolutions` path.
+Bypassing classification entirely (tapping a library entry, an alternative-match suggestion, or
+the sidebar's algorithm dropdown) goes through `ClassificationNotifier.selectManually(id)`
+instead, which synthesizes a `ClassificationResult` with confidence 1.0 and feeds the same
+`resolveSolutions` path.
+
+### UI layout: IDE/playground shell
+
+`HomeScreen` (`lib/screens/home_screen.dart`) is a `Row`: a collapsible `AppSidebar` on the left,
+a `VerticalDivider`, then `MainWorkspace` filling the rest.
+
+- **`AppSidebar`** (`lib/widgets/app_sidebar.dart`) — collapses between `_expandedWidth` (272)
+  and `_collapsedWidth` (56) via `sidebarExpandedProvider`. Holds the `AlgorithmDropdown`
+  (jump straight to a catalog entry, bypassing classification), `ParadigmDropdown` (single-select
+  hint sent to the classifier), and the `LibraryBrowser` list. The width animates via
+  `AnimatedContainer`, but the inner content is laid out in a fixed-size `OverflowBox`
+  (`_expandedWidth`) that the outer container clips — **don't replace that with a plain
+  `SizedBox`**: a `SizedBox` doesn't override the tight width constraint an animating `Container`
+  imposes on its child, so at intermediate widths a `ListTile` (title + trailing icon) can't fit
+  and throws mid-animation. `OverflowBox` explicitly ignores the incoming constraint instead.
+- **`MainWorkspace`** (`lib/widgets/workspace.dart`) — a `Column` of `_ContentArea` (`Expanded`)
+  over a docked `_BottomInputBar` (the problem `TextField` + Solve button, always pinned to the
+  bottom regardless of scroll — the "console input" of the IDE metaphor). `_ContentArea` owns a
+  `TabController` for the Pseudocode/Flowchart/Code view-mode tabs, created eagerly in
+  `initState` (not as a lazy `late` field initializer — see inline comment; a lazy field whose
+  first access happens inside `dispose()` tries to create a vsync'd `AnimationController` on an
+  already-deactivated element and crashes). A separate `_variantIndex` (local state, reset via
+  `ref.listen` when the matched `problemId` changes) picks which `SolutionModel` variant is
+  shown; changing algorithm/variant deliberately does **not** reset the view-mode tab, so a user
+  parked on the Code tab stays there when they jump to a different problem.
+- Multiple resolved variants for one problem surface as a `DropdownButton` in the workspace
+  breadcrumb bar (only rendered when `solutions.length > 1`) — today unreachable since
+  `merge_sort` has a single variant, but exercised as soon as a library entry gets a second one.
 
 ### Core types and where they live
 
