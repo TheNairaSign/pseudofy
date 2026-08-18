@@ -17,9 +17,13 @@ placeholders are filled in deterministically. This trades "AI can solve anything
 "correct by construction," at the cost of the library needing to be authored up front.
 
 **Project status:** MVP UI is wired up and working end to end (input → classify → library lookup →
-substitution → tabbed pseudocode/flowchart/code output), backed by a one-entry seed library
-(`merge_sort`). Growing the library (per the roadmap's target seed set below) is the main
-remaining gap, not plumbing.
+substitution → tabbed pseudocode/flowchart/code output), backed by an 8-entry seed library
+(`merge_sort`, `fibonacci`, `n_queens`, `knapsack_01`, `coin_change`, `subset_sum`,
+`activity_selection`, `binary_search` — the full roadmap seed set). Several entries adapt code
+from [TheAlgorithms/Dart](https://github.com/TheAlgorithms/Dart) (MIT License), marked with a
+`// Adapted from TheAlgorithms/Dart ...` comment naming the source file; entries/variants without
+that comment are original (the source repo has no Subset Sum or Activity Selection, and no
+Branch-and-Bound N-Queens / DP Knapsack / Greedy Coin Change variants).
 
 **Offline dev/test path:** `ClassificationService` calls the real Claude API only when
 `ANTHROPIC_API_KEY` is passed via `--dart-define`. With no key (the default for `flutter test`
@@ -27,6 +31,13 @@ and local `flutter run`), it falls back to `LocalClassifier`
 (`lib/core/services/local_classifier.dart`) — a pure-Dart, deterministic word-overlap matcher
 against the library's titles/tags. This is what lets the whole app be exercised and tested
 without a key; it is not a substitute for real classification quality.
+
+**Before debugging something that feels like a framework quirk** (Riverpod provider APIs,
+Flutter layout/animation assertions, deprecated widget params, etc.), check
+[CHALLENGES.md](CHALLENGES.md) first — it's a running log of real issues already hit in this
+project with their root cause and fix. Keep it updated: append a new entry there (don't rewrite
+history) whenever you hit and resolve a non-obvious bug, framework gotcha, or design gap in this
+project, in the same format as the existing entries (Symptom / Root cause / Fix).
 
 ## Commands
 
@@ -118,8 +129,8 @@ a `VerticalDivider`, then `MainWorkspace` filling the rest.
   shown; changing algorithm/variant deliberately does **not** reset the view-mode tab, so a user
   parked on the Code tab stays there when they jump to a different problem.
 - Multiple resolved variants for one problem surface as a `DropdownButton` in the workspace
-  breadcrumb bar (only rendered when `solutions.length > 1`) — today unreachable since
-  `merge_sort` has a single variant, but exercised as soon as a library entry gets a second one.
+  breadcrumb bar (only rendered when `solutions.length > 1`) — e.g. `n_queens` (Backtracking /
+  Branch and Bound), `knapsack_01` (Brute Force / Dynamic Programming).
 
 ### Core types and where they live
 
@@ -128,10 +139,12 @@ a `VerticalDivider`, then `MainWorkspace` filling the rest.
   `defaultNaming`). This is the *shape* of a library entry.
 - `lib/library/library_samples.dart` — the actual library *data*: the `algorithmLibrary` map
   (`Map<String, ProblemEntry>`). This file only ever grows by adding more `ProblemEntry`
-  constants and must never touch core model/architecture files. Currently seeded with one
-  entry (`merge_sort`); the roadmap's target seed set is listed in
-  [algo-solver-app-flow-and-mvp.md](algo-solver-app-flow-and-mvp.md) (Fibonacci, N-Queens,
-  Knapsack, Coin Change, Subset Sum, Activity Selection, Binary Search, ...).
+  constants and must never touch core model/architecture files. Holds the full roadmap seed set
+  from [algo-solver-app-flow-and-mvp.md](algo-solver-app-flow-and-mvp.md) — 8 entries, several
+  with multiple paradigm variants. Some `codeTemplates['dart']` values are adapted from
+  [TheAlgorithms/Dart](https://github.com/TheAlgorithms/Dart) (MIT) with an attribution comment
+  naming the source file; when adding more, keep following that convention and double-check the
+  placeholder-completeness invariant below.
 - `lib/core/naming_context.dart` — `NamingContext`, the open-ended slot map (`person`, `object`,
   `activity`, ...) used purely for cosmetic personalization of rendered templates, kept
   intentionally separate from behavior-affecting params.
@@ -151,13 +164,15 @@ a `VerticalDivider`, then `MainWorkspace` filling the rest.
   `.selectManually(id)` to bypass it, `.reset()` back to idle), `solutionsProvider` (pure
   derivation, no network), and `classificationOutcomeProvider` (collapses async state into
   `idle | loading | matched | noMatch | error` for UI branching).
-- `lib/screens/home_screen.dart` — the single screen: problem input, paradigm filter chips,
-  Solve button, and a results area that switches on `classificationOutcomeProvider`.
-- `lib/widgets/` — `solution_view.dart` (tab structure described above), `flowchart_view.dart`
-  (renders `FlowchartData` via `Positioned` nodes + a `CustomPainter` for edges inside an
-  `InteractiveViewer` — no `flutter_flow_chart` package dependency), `code_view.dart` (language
-  dropdown + copy), `paradigm_chips.dart`, `library_browser.dart` (used both as the idle-state
-  default and inside the no-match fallback).
+- `lib/screens/home_screen.dart` — the single screen: `Row(AppSidebar, MainWorkspace)`, see
+  "UI layout" above.
+- `lib/widgets/` — `app_sidebar.dart`, `workspace.dart` (breadcrumb + view-mode tabs + docked
+  input, see "UI layout" above), `algorithm_dropdown.dart`, `paradigm_dropdown.dart`,
+  `library_browser.dart` (used both in the sidebar and inside the no-match fallback),
+  `pseudocode_view.dart` (selectable text + copy button), `code_view.dart` (language dropdown +
+  copy), `flowchart_view.dart` (renders `FlowchartData` via `Positioned` nodes + a
+  `CustomPainter` for edges inside an `InteractiveViewer` — no `flutter_flow_chart` package
+  dependency).
 
 ### Key invariants to preserve when extending
 
@@ -175,5 +190,13 @@ a `VerticalDivider`, then `MainWorkspace` filling the rest.
 - When adding a new library entry, don't touch `library_entry.dart` (the shape) unless the shape
   itself needs to change — new problems only add entries to the `algorithmLibrary` map in
   `library_samples.dart`.
+- **Placeholder completeness:** give every `ParadigmVariant` a `defaultNaming` entry for *every*
+  `{{slot}}` it uses — including behavior-style ones like `{{n}}`/`{{capacity}}`/`{{target}}`,
+  not just cosmetic ones like `{{person}}`/`{{object}}`. Picking a library entry directly
+  (sidebar dropdown, list tap, alternative-match chip) always resolves with empty
+  `extractedParams`/`namingContext` via `selectManually`, so anything without a default renders
+  as a literal, unfilled `{{...}}` in the UI — and that direct-selection path is the primary way
+  users interact with this playground, not the edge case. See CHALLENGES.md's "Direct library
+  selection would have shown raw, unfilled placeholders" entry.
 - The Claude API key is read via `String.fromEnvironment('ANTHROPIC_API_KEY')` at build time
   (`--dart-define`), never hardcoded.
