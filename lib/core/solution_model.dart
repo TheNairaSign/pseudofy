@@ -96,13 +96,22 @@ List<SolutionModel> resolveSolutions(
     final naming = variant.defaultNaming.mergedWith(classification.namingContext);
 
     return SolutionModel(
+      problemId: entry.id,
+      problemTitle: entry.title,
       paradigm: e.key,
       pseudocode: substituteAll(
         variant.pseudocodeTemplate,
         classification.extractedParams,
         naming,
       ),
-      flowchart: variant.flowchart, // node/edge/position data is static
+      // Node/edge positions and structure are static, but labels can carry
+      // the same {{param}}/{{namingSlot}} placeholders as pseudocode/code —
+      // substitute those too, or they'd render literally in the UI.
+      flowchart: _substituteFlowchart(
+        variant.flowchart,
+        classification.extractedParams,
+        naming,
+      ),
       code: variant.codeTemplates.map(
         (lang, code) => MapEntry(
           lang,
@@ -113,6 +122,33 @@ List<SolutionModel> resolveSolutions(
       complexitySpace: variant.complexitySpace,
     );
   }).toList();
+}
+
+FlowchartData _substituteFlowchart(
+  FlowchartData data,
+  Map<String, dynamic> params,
+  NamingContext naming,
+) {
+  return FlowchartData(
+    nodes: data.nodes
+        .map((n) => FlowNode(
+              id: n.id,
+              type: n.type,
+              label: substituteAll(n.label, params, naming),
+              x: n.x,
+              y: n.y,
+            ))
+        .toList(),
+    edges: data.edges
+        .map((edge) => FlowEdge(
+              from: edge.from,
+              to: edge.to,
+              label: edge.label == null
+                  ? null
+                  : substituteAll(edge.label!, params, naming),
+            ))
+        .toList(),
+  );
 }
 
 // ---------- Classification prompt ----------

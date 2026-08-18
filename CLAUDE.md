@@ -16,41 +16,52 @@ solution content is hand-authored Dart data in `lib/core/library_samples.dart`, 
 placeholders are filled in deterministically. This trades "AI can solve anything" for
 "correct by construction," at the cost of the library needing to be authored up front.
 
-**Project status:** early scaffolding. `lib/main.dart` is still the stock Flutter counter demo —
-no real UI has been built yet. The core data layer (models, one library entry for merge sort,
-classification service, Riverpod providers) exists and works standalone, but nothing in `main.dart`
-wires into it yet. `lib/library/` exists but is empty (intended home for future UI/browsing code
-per the roadmap doc's `library/` folder convention).
+**Project status:** MVP UI is wired up and working end to end (input → classify → library lookup →
+substitution → tabbed pseudocode/flowchart/code output), backed by a one-entry seed library
+(`merge_sort`). Growing the library (per the roadmap's target seed set below) is the main
+remaining gap, not plumbing.
+
+**Offline dev/test path:** `ClassificationService` calls the real Claude API only when
+`ANTHROPIC_API_KEY` is passed via `--dart-define`. With no key (the default for `flutter test`
+and local `flutter run`), it falls back to `LocalClassifier`
+(`lib/core/services/local_classifier.dart`) — a pure-Dart, deterministic word-overlap matcher
+against the library's titles/tags. This is what lets the whole app be exercised and tested
+without a key; it is not a substitute for real classification quality.
 
 ## Commands
 
 ```bash
 flutter pub get                 # install dependencies (run after pulling or editing pubspec.yaml)
 flutter analyze                 # static analysis / lints (flutter_lints ruleset via analysis_options.yaml)
-flutter test                    # run all tests in test/
-flutter test test/widget_test.dart --plain-name "Counter increments smoke test"  # run a single test
-flutter run --dart-define=ANTHROPIC_API_KEY=sk-...   # run the app; classification calls fail without this
+flutter test                    # run all tests in test/ (uses the offline LocalClassifier fallback)
+flutter test --plain-name "solving via the offline classifier"  # run a single test by name
+flutter run -d chrome           # run in a browser; offline fallback classifier, no key needed
+flutter run --dart-define=ANTHROPIC_API_KEY=sk-...   # run against the real Claude API instead
 flutter build <ios|apk|web|macos|...>                 # platform build
 ```
+
+A `flutter run -d chrome` launch config is in `.claude/launch.json` (usable via the browser
+preview tooling) — named `pseudofy-web`, port 8765.
 
 There is no separate lint/format config beyond `analysis_options.yaml` (which just includes
 `package:flutter_lints/flutter.yaml`). Use `dart format .` for formatting.
 
 ## Architecture
 
-### Data flow (per the MVP roadmap — only partially wired into UI so far)
+### Data flow
 
 ```
-user free text + optional paradigm filter
+user free text + optional paradigm filter (HomeScreen)
         │
         ▼
 ClassificationService.classify()   (lib/core/services/classification_service.dart)
-  - the ONLY network-touching code in the app
-  - calls Claude (model set in ClassificationService._model) with a system prompt built by
+  - the only network-touching code in the app, IF a key is configured
+  - with ANTHROPIC_API_KEY set: calls Claude with a system prompt built by
     buildClassificationSystemPrompt() (lib/core/solution_model.dart), which embeds the full
-    library catalog (ids/titles/tags) so the model can only choose from a known closed set
-  - parses/validates the response into a ClassificationResult; retries once on bad JSON;
-    rejects any matchedProblemId not actually present in the library
+    library catalog (ids/titles/tags) so the model can only choose from a known closed set;
+    retries once on bad JSON; rejects any matchedProblemId not actually present in the library
+  - with no key: delegates to LocalClassifier (lib/core/services/local_classifier.dart), a
+    pure-Dart offline word-overlap matcher used for local dev/test — see note above
         │
         ▼
 ClassificationResult                (lib/core/solution_model.dart)
@@ -64,18 +75,29 @@ ClassificationResult                (lib/core/solution_model.dart)
 resolveSolutions(classification, library)   (lib/core/solution_model.dart)
   - pure Dart, no network — looks up the ProblemEntry by id, layers namingContext over each
     variant's defaultNaming, and runs substituteAll() to fill {{param}}/{{namingSlot}}
-    placeholders in pseudocode/code templates
+    placeholders in pseudocode templates, code templates, AND flowchart node/edge labels
+    (all three carry the same placeholder syntax — easy to forget the flowchart one since its
+    structure/positions otherwise pass through unchanged)
         │
         ▼
-List<SolutionModel>   — one per paradigm variant, ready for UI tabs
+List<SolutionModel>   — one per paradigm variant, each also carrying problemId/problemTitle
+so the UI can show which catalog entry matched
+        │
+        ▼
+SolutionView (lib/widgets/solution_view.dart) — outer tab per paradigm variant, inner tabs
+Pseudocode / Flowchart / Code
 ```
+
+Bypassing classification entirely (tapping a library entry or an alternative-match suggestion)
+goes through `ClassificationNotifier.selectManually(id)` instead, which synthesizes a
+`ClassificationResult` with confidence 1.0 and feeds the same `resolveSolutions` path.
 
 ### Core types and where they live
 
-- `lib/core/library_entry.dart` — `ProblemEntry` (id/title/tags/variants) and `ParadigmVariant`
-  (pseudocode template, flowchart, per-language code templates, complexity, `defaultNaming`).
-  This is the *shape* of a library entry.
-- `lib/core/library_samples.dart` — the actual library *data*: the `algorithmLibrary` map
+- `lib/library/library_entry.dart` — `ProblemEntry` (id/title/tags/variants) and
+  `ParadigmVariant` (pseudocode template, flowchart, per-language code templates, complexity,
+  `defaultNaming`). This is the *shape* of a library entry.
+- `lib/library/library_samples.dart` — the actual library *data*: the `algorithmLibrary` map
   (`Map<String, ProblemEntry>`). This file only ever grows by adding more `ProblemEntry`
   constants and must never touch core model/architecture files. Currently seeded with one
   entry (`merge_sort`); the roadmap's target seed set is listed in
@@ -84,31 +106,43 @@ List<SolutionModel>   — one per paradigm variant, ready for UI tabs
 - `lib/core/naming_context.dart` — `NamingContext`, the open-ended slot map (`person`, `object`,
   `activity`, ...) used purely for cosmetic personalization of rendered templates, kept
   intentionally separate from behavior-affecting params.
-- `lib/core/solution_model.dart` — `SolutionModel` (final resolved output per variant),
-  `ClassificationResult` (the AI's only output shape), the `substituteAll` template-filling
-  logic, `resolveSolutions` (classification → solutions), and `buildClassificationSystemPrompt`.
-  This is the busiest file in the core layer — most cross-cutting logic lives here rather than
-  being split across files that match filenames 1:1.
+- `lib/core/solution_model.dart` — `SolutionModel` (final resolved output per variant, including
+  `problemId`/`problemTitle`), `ClassificationResult` (the AI's only output shape), the
+  `substituteAll` template-filling logic, `resolveSolutions` (classification → solutions), and
+  `buildClassificationSystemPrompt`. This is the busiest file in the core layer — most
+  cross-cutting logic lives here rather than being split across files that match filenames 1:1.
 - `lib/core/representation/flow_chart/flow_node.dart` — flowchart primitives: `FlowNode`,
   `FlowEdge`, `FlowchartData`. Nodes are hand-authored with fixed `x`/`y` — there is no
   auto-layout by design (flowcharts are static per library entry).
-- `lib/core/core_models.dart` — currently empty; not yet in use.
-- `lib/core/services/classification_service.dart` — see data flow above.
+- `lib/core/services/classification_service.dart` / `local_classifier.dart` — see data flow
+  above.
 - `lib/providers/providers.dart` — Riverpod wiring: `problemInputProvider` (text + paradigm
   filter), `algorithmLibraryProvider`, `classificationServiceProvider`,
-  `classificationProvider` (`AsyncNotifier` that makes the one API call on `.solve()`),
-  `solutionsProvider` (pure derivation, no network), and `classificationOutcomeProvider`
-  (collapses async state into `idle | loading | matched | noMatch | error` for UI branching).
+  `classificationProvider` (`AsyncNotifier` with `.solve()` for the real/offline classify call,
+  `.selectManually(id)` to bypass it, `.reset()` back to idle), `solutionsProvider` (pure
+  derivation, no network), and `classificationOutcomeProvider` (collapses async state into
+  `idle | loading | matched | noMatch | error` for UI branching).
+- `lib/screens/home_screen.dart` — the single screen: problem input, paradigm filter chips,
+  Solve button, and a results area that switches on `classificationOutcomeProvider`.
+- `lib/widgets/` — `solution_view.dart` (tab structure described above), `flowchart_view.dart`
+  (renders `FlowchartData` via `Positioned` nodes + a `CustomPainter` for edges inside an
+  `InteractiveViewer` — no `flutter_flow_chart` package dependency), `code_view.dart` (language
+  dropdown + copy), `paradigm_chips.dart`, `library_browser.dart` (used both as the idle-state
+  default and inside the no-match fallback).
 
 ### Key invariants to preserve when extending
 
 - Keep the network boundary singular: `ClassificationService` should remain the only place that
-  makes HTTP calls. Solution rendering (`resolveSolutions`, `substituteAll`) must stay pure Dart.
+  can make HTTP calls (the `LocalClassifier` fallback it delegates to when no key is set must
+  stay pure Dart). Solution rendering (`resolveSolutions`, `substituteAll`) must stay pure Dart.
 - The classifier must only ever be able to return a `matchedProblemId` that exists in
-  `algorithmLibrary` — `ClassificationService._callAndParse` enforces this; preserve that check
-  if the catalog-building logic changes.
+  `algorithmLibrary` — `ClassificationService._callAndParse` enforces this for the real API path;
+  preserve that check if the catalog-building logic changes.
 - Keep `extractedParams` (behavior) and `namingContext` (cosmetic) separate rather than merging
   them into one params map — this is a deliberate safety boundary, not incidental structure.
+- Any place a template can contain `{{slot}}` placeholders (pseudocode, code, AND flowchart
+  labels) must go through `substituteAll`/`resolveSolutions` — don't pass raw template data to
+  the UI.
 - When adding a new library entry, don't touch `library_entry.dart` (the shape) unless the shape
   itself needs to change — new problems only add entries to the `algorithmLibrary` map in
   `library_samples.dart`.

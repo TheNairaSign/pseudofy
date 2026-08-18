@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pseudofy/library/library_entry.dart';
+import 'package:pseudofy/core/naming_context.dart';
 import 'package:pseudofy/core/services/classification_service.dart';
 import 'package:pseudofy/core/solution_model.dart';
 import 'package:pseudofy/library/library_samples.dart' show algorithmLibrary;
@@ -63,6 +64,23 @@ class ClassificationNotifier extends AsyncNotifier<ClassificationResult?> {
       );
     });
   }
+
+  /// Bypasses classification entirely — used when the user picks a problem
+  /// directly from an alternative-match chip or the library browser.
+  void selectManually(String problemId) {
+    state = AsyncData(
+      ClassificationResult(
+        matchedProblemId: problemId,
+        confidence: 1.0,
+        extractedParams: const {},
+        namingContext: const NamingContext(),
+        alternativeMatches: const [],
+      ),
+    );
+  }
+
+  /// Returns to the idle/library-browsing state.
+  void reset() => state = const AsyncData(null);
 }
 
 final classificationProvider = AsyncNotifierProvider<ClassificationNotifier, ClassificationResult?>(
